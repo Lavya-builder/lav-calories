@@ -906,6 +906,19 @@
   </div>
 </div>
 
+<!-- MODAL: SCAN RESULT ANALYSIS -->
+<div class="modal-overlay" id="scanResultModal">
+  <div class="modal-content">
+    <button class="modal-close" data-close-modal="scanResultModal">&times;</button>
+    <div class="modal-title">📊 Nutrition Analysis</div>
+    <div id="scanResultContent"></div>
+    <div style="display:flex;gap:10px;margin-top:16px;">
+      <button type="button" id="scanResultAddBtn" class="btn-add" style="flex:1;">+ Add to Log</button>
+      <button type="button" class="btn-add" style="flex:1;background:#30363d;" data-close-modal="scanResultModal">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL: MEAL PREP PLANNER -->
 <div class="modal-overlay" id="planModal">
   <div class="modal-content">
@@ -1395,14 +1408,14 @@
     });
     // Show local results immediately
     var localResults = results.slice(0, 15);
-    if (callback) callback(null, localResults);
+    if (callback) callback(null, localResults, false);
     // Then fire XHR for API results (background enrichment)
     var url = 'https://world.openfoodfacts.org/cgi/search.pl?search_terms=' + encodeURIComponent(query.trim()) + '&page_size=5&json=1&fields=product_name,nutriments,code';
     var xhr = new XMLHttpRequest();
     xhr.open('GET', url, true);
     xhr.timeout = 6000;
     xhr.onload = function() {
-      if (xhr.status < 200 || xhr.status >= 300) return;
+      if (xhr.status < 200 || xhr.status >= 300) { if (callback) callback(null, null, true); return; }
       try {
         var data = JSON.parse(xhr.responseText);
         (data.products || []).forEach(function(p) {
@@ -1412,10 +1425,12 @@
           var key = item.name.toLowerCase();
           if (!seen[key]) { seen[key] = true; results.push(item); setCached(item.name, item); }
         });
-        if (results.length > localResults.length && callback) callback(null, results.slice(0, 15));
-      } catch(e) {}
+        if (results.length > localResults.length && callback) callback(null, results.slice(0, 15), true);
+        else if (callback) callback(null, null, true);
+      } catch(e) { if (callback) callback(null, null, true); }
     };
-    xhr.onerror = xhr.ontimeout = function() {};
+    xhr.onerror = function() { if (callback) callback(null, null, true); };
+    xhr.ontimeout = function() { if (callback) callback(null, null, true); };
     xhr.send();
   }
 
@@ -1434,7 +1449,7 @@
           var p = data.product;
           var n = p.nutriments;
           if (!n || n.proteins_100g == null) { if (!called) { called = true; tryIndia(); } return; }
-          var item = { name: p.product_name || 'Unknown', protein: parseFloat(n.proteins_100g)||0, carbs: parseFloat(n.carbohydrates_100g)||0, fats: parseFloat(n.fat_100g)||0, fiber: parseFloat(n.fiber_100g)||0, source: 'api', code: p.code || barcode };
+          var item = { name: p.product_name || 'Unknown', protein: parseFloat(n.proteins_100g)||0, carbs: parseFloat(n.carbohydrates_100g)||0, fats: parseFloat(n.fat_100g)||0, fiber: parseFloat(n.fiber_100g)||0, sugars: parseFloat(n.sugars_100g)!=null?parseFloat(n.sugars_100g):null, saturatedFat: parseFloat(n['saturated-fat_100g'])!=null?parseFloat(n['saturated-fat_100g']):null, sodium: parseFloat(n.sodium_100g)!=null?parseFloat(n.sodium_100g):null, source: 'api', code: p.code || barcode };
           setCached(item.name, item);
           called = true;
           callback(null, item);
@@ -1457,7 +1472,7 @@
           var p = data.product;
           var n = p.nutriments;
           if (!n || n.proteins_100g == null) { callback(new Error('No nutrition data'), null); return; }
-          var item = { name: p.product_name || 'Unknown', protein: parseFloat(n.proteins_100g)||0, carbs: parseFloat(n.carbohydrates_100g)||0, fats: parseFloat(n.fat_100g)||0, fiber: parseFloat(n.fiber_100g)||0, source: 'api', code: p.code || barcode };
+          var item = { name: p.product_name || 'Unknown', protein: parseFloat(n.proteins_100g)||0, carbs: parseFloat(n.carbohydrates_100g)||0, fats: parseFloat(n.fat_100g)||0, fiber: parseFloat(n.fiber_100g)||0, sugars: parseFloat(n.sugars_100g)!=null?parseFloat(n.sugars_100g):null, saturatedFat: parseFloat(n['saturated-fat_100g'])!=null?parseFloat(n['saturated-fat_100g']):null, sodium: parseFloat(n.sodium_100g)!=null?parseFloat(n.sodium_100g):null, source: 'api', code: p.code || barcode };
           setCached(item.name, item);
           callback(null, item);
         } catch(e) { callback(e, null); }
@@ -1512,18 +1527,16 @@
   }
 
   /* —— Search Results —— */
-  function showSearchResults(results, isError) {
+  function showSearchResults(results, isWebUpdate) {
     searchResults.innerHTML = '';
-    if (isError) {
-      searchResults.innerHTML = '<div class="sr-error">\u26a0\ufe0f Could not reach online database.<br>Local database results shown above.</div>';
-      searchResults.classList.add('open'); searchOpen = true; return;
-    }
     if (!results || results.length === 0) {
-      searchResults.innerHTML = '<div class="sr-none">No foods found. Try a different search term.</div>';
-      searchResults.classList.add('open'); searchOpen = true; return;
+      if (!isWebUpdate) { searchResults.innerHTML = '<div class="sr-none">No foods found. Try a different search term.</div>'; searchResults.classList.add('open'); searchOpen = true; }
+      return;
     }
     var html = '';
+    var hasApiResults = false;
     results.forEach(function(item, idx) {
+      if (item.source === 'api' && !hasApiResults) { hasApiResults = true; html += '<div style="padding:6px 12px;font-size:0.7rem;color:#d29922;text-transform:uppercase;letter-spacing:0.04em;border-top:1px solid #1c2333;margin-top:4px;padding-top:8px;">🌐 Web Results</div>'; }
       var cals = calcCalories(item.protein, item.carbs, item.fats);
       var src = item.source === 'local' ? '\u2605' : (item.source === 'cached' ? '\u25ce' : '\ud83c\udf10');
       html += '<div class="sr-item" data-index="'+idx+'"><span class="sr-name">'+escapeHtml(item.name)+'</span><span><b>'+cals+'</b> kcal <span class="sr-source">'+src+'</span></span></div>';
@@ -1924,7 +1937,6 @@
     if (detectHint) detectHint.style.display = 'none';
     if (manualInput) manualInput.classList.remove('upc-pulse');
     if (scannerDetectTimeout) { clearTimeout(scannerDetectTimeout); scannerDetectTimeout = null; }
-    scannerEmptyCount = 0;
     // Browser check: skip camera if BarcodeDetector not available
     if (!window.BarcodeDetector) {
       if (fbMsg) {
@@ -2051,14 +2063,89 @@
       handleScanResult(err, item);
     });
   }
+  function analyzeNutrition(item) {
+    var p100 = item.protein || 0;
+    var c100 = item.carbs || 0;
+    var f100 = item.fats || 0;
+    var fb100 = item.fiber || 0;
+    var s100 = item.sugars != null ? item.sugars : c100;
+    var sf100 = item.saturatedFat != null ? item.saturatedFat : -1;
+    var na100 = item.sodium != null ? item.sodium : -1;
+    var cal100 = calcCalories(p100, c100, f100);
+
+    var good = [];
+    var bad = [];
+    var warnings = [];
+
+    if (p100 >= 15) good.push({ label: 'High Protein (' + p100 + 'g/100g)', detail: 'Great for muscle growth, repair, and satiety.' });
+    else if (p100 <= 3 && p100 > 0) bad.push({ label: 'Low Protein (' + p100 + 'g/100g)', detail: 'Provides very little protein per serving.' });
+
+    if (fb100 >= 5) good.push({ label: 'High Fiber (' + fb100 + 'g/100g)', detail: 'Supports digestion, heart health, and blood sugar stability.' });
+    else if (fb100 <= 1 && fb100 > 0) bad.push({ label: 'Low Fiber (' + fb100 + 'g/100g)', detail: 'Low fiber content — may not aid digestion or satiety.' });
+
+    if (s100 >= 15) {
+      bad.push({ label: 'High Sugar (' + s100 + 'g/100g)', detail: 'Excess sugar linked to inflammation, cravings, and metabolic issues.' });
+      warnings.push('⚠️ Consuming daily may increase risk of weight gain, blood sugar spikes, and type 2 diabetes. Limit to occasional use (1-2x/week max).');
+    } else if (s100 <= 5) good.push({ label: 'Low Sugar (' + s100 + 'g/100g)', detail: 'Helps maintain stable blood sugar and energy levels.' });
+
+    if (sf100 >= 5) {
+      bad.push({ label: 'High Saturated Fat (' + sf100 + 'g/100g)', detail: 'Can raise LDL (bad) cholesterol levels.' });
+      warnings.push('⚠️ Frequent consumption may increase heart disease risk. Best enjoyed occasionally (1-2x/week max).');
+    } else if (sf100 >= 0 && sf100 <= 1.5) good.push({ label: 'Low Saturated Fat (' + sf100 + 'g/100g)', detail: 'Heart-friendly choice.' });
+
+    if (na100 >= 0.6) {
+      bad.push({ label: 'High Sodium (' + (na100*1000).toFixed(0) + 'mg/100g)', detail: 'Excess sodium can raise blood pressure.' });
+      warnings.push('⚠️ Daily consumption may lead to hypertension and fluid retention. Limit if you have blood pressure concerns.');
+    } else if (na100 >= 0 && na100 <= 0.3) good.push({ label: 'Low Sodium (' + (na100*1000).toFixed(0) + 'mg/100g)', detail: 'Supports healthy blood pressure.' });
+
+    if (cal100 >= 300) bad.push({ label: 'Calorie-Dense (' + cal100 + ' kcal/100g)', detail: 'High calorie density — portion control recommended.' });
+    else if (cal100 <= 100) good.push({ label: 'Low Calorie (' + cal100 + ' kcal/100g)', detail: 'Great for weight management.' });
+
+    return { good: good, bad: bad, warnings: warnings, calories: cal100, protein: p100, carbs: c100, fats: f100, fiber: fb100, sugars: s100, saturatedFat: sf100, sodium: na100 };
+  }
+
+  function renderScanAnalysis(item) {
+    var a = analyzeNutrition(item);
+    var html = '<div style="background:#161b22;border-radius:12px;padding:16px;margin-bottom:12px;">';
+    html += '<div style="font-size:1.2rem;font-weight:700;color:#e6edf3;margin-bottom:8px;">' + escapeHtml(item.name) + '</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:12px;">';
+    html += '<div style="background:#1c2333;border-radius:8px;padding:8px;text-align:center;"><div style="font-size:0.65rem;color:#8b949e;text-transform:uppercase;">Calories</div><div style="font-size:1.1rem;font-weight:700;color:#3fb950;">' + a.calories + '</div><div style="font-size:0.65rem;color:#6e7681;">kcal/100g</div></div>';
+    html += '<div style="background:#1c2333;border-radius:8px;padding:8px;text-align:center;"><div style="font-size:0.65rem;color:#8b949e;text-transform:uppercase;">Protein</div><div style="font-size:1.1rem;font-weight:700;color:#58a6ff;">' + a.protein + 'g</div><div style="font-size:0.65rem;color:#6e7681;">per 100g</div></div>';
+    html += '<div style="background:#1c2333;border-radius:8px;padding:8px;text-align:center;"><div style="font-size:0.65rem;color:#8b949e;text-transform:uppercase;">Carbs</div><div style="font-size:1.1rem;font-weight:700;color:#d29922;">' + a.carbs + 'g</div><div style="font-size:0.65rem;color:#6e7681;">per 100g</div></div>';
+    html += '<div style="background:#1c2333;border-radius:8px;padding:8px;text-align:center;"><div style="font-size:0.65rem;color:#8b949e;text-transform:uppercase;">Fats</div><div style="font-size:1.1rem;font-weight:700;color:#f85149;">' + a.fats + 'g</div><div style="font-size:0.65rem;color:#6e7681;">per 100g</div></div>';
+    html += '<div style="background:#1c2333;border-radius:8px;padding:8px;text-align:center;"><div style="font-size:0.65rem;color:#8b949e;text-transform:uppercase;">Fiber</div><div style="font-size:1.1rem;font-weight:700;color:#7ee787;">' + a.fiber + 'g</div><div style="font-size:0.65rem;color:#6e7681;">per 100g</div></div>';
+    html += '<div style="background:#1c2333;border-radius:8px;padding:8px;text-align:center;"><div style="font-size:0.65rem;color:#8b949e;text-transform:uppercase;">Sugar</div><div style="font-size:1.1rem;font-weight:700;color:' + (a.sugars >= 15 ? '#f85149' : '#e6edf3') + ';">' + a.sugars + 'g</div><div style="font-size:0.65rem;color:#6e7681;">per 100g</div></div>';
+    html += '</div>';
+
+    if (a.good.length > 0) {
+      html += '<div style="background:rgba(63,185,80,0.1);border:1px solid rgba(63,185,80,0.3);border-radius:8px;padding:10px;margin-bottom:8px;"><div style="font-size:0.78rem;font-weight:700;color:#3fb950;margin-bottom:4px;">✅ What's Good</div>';
+      a.good.forEach(function(g) { html += '<div style="font-size:0.78rem;color:#e6edf3;margin-bottom:2px;"><b>' + g.label + '</b> — ' + g.detail + '</div>'; });
+      html += '</div>';
+    }
+
+    if (a.bad.length > 0) {
+      html += '<div style="background:rgba(248,81,73,0.1);border:1px solid rgba(248,81,73,0.3);border-radius:8px;padding:10px;margin-bottom:8px;"><div style="font-size:0.78rem;font-weight:700;color:#f85149;margin-bottom:4px;">❌ What to Watch Out For</div>';
+      a.bad.forEach(function(b) { html += '<div style="font-size:0.78rem;color:#e6edf3;margin-bottom:2px;"><b>' + b.label + '</b> — ' + b.detail + '</div>'; });
+      html += '</div>';
+    }
+
+    a.warnings.forEach(function(w) {
+      html += '<div style="background:rgba(210,153,34,0.12);border:1px solid rgba(210,153,34,0.3);border-radius:8px;padding:10px;margin-bottom:6px;font-size:0.82rem;color:#d29922;font-weight:500;">' + w + '</div>';
+    });
+
+    if (a.good.length === 0 && a.bad.length === 0 && a.warnings.length === 0) {
+      html += '<div style="background:#1c2333;border-radius:8px;padding:10px;font-size:0.82rem;color:#8b949e;text-align:center;">Limited nutritional data available for this product.</div>';
+    }
+
+    html += '</div>';
+    document.getElementById('scanResultContent').innerHTML = html;
+  }
+
   function handleScanResult(err, item) {
     if (!err && item) {
-      foodNameInput.value = item.name;
       selectedFood = item;
-      updatePreview();
-      validateForm();
-      openModal('mealModal');
-      setTimeout(function() { if (mealNameInput) mealNameInput.focus(); }, 200);
+      renderScanAnalysis(item);
+      openModal('scanResultModal');
     } else {
       alert('Product not found. Try searching manually.');
     }
@@ -2143,9 +2230,20 @@
     showSearchLoading();
     if (searchTimer) clearTimeout(searchTimer);
     searchTimer = setTimeout(function() {
-      searchFoods(query, function(err, results) {
-        if (results && results.length > 0) showSearchResults(results, false);
-        else { searchResults.innerHTML = '<div class="sr-none">No foods found. Try a different search term.</div>'; searchResults.classList.add('open'); searchOpen = true; }
+      searchFoods(query, function(err, results, isWebResult) {
+        if (results && results.length > 0) showSearchResults(results, isWebResult);
+        else if (!isWebResult) { searchResults.innerHTML = '<div class="sr-none">No foods found. Try a different search term.</div>'; searchResults.classList.add('open'); searchOpen = true; }
+        if (!isWebResult && searchOpen && !results.some(function(r){return r.source==='api';})) {
+          var hint = document.createElement('div');
+          hint.id = 'webSearchHint';
+          hint.style.cssText = 'padding:8px 12px;font-size:0.75rem;color:#6e7681;text-align:center;border-top:1px solid #1c2333;';
+          hint.textContent = '🌐 Searching web database...';
+          searchResults.appendChild(hint);
+        }
+        if (isWebResult) {
+          var hint = document.getElementById('webSearchHint');
+          if (hint) hint.remove();
+        }
       });
     }, 400);
   }
@@ -2949,6 +3047,17 @@
     if (customFoodSaveBtn) customFoodSaveBtn.addEventListener('click', addCustomFood);
     var barcodeScanBtn = document.getElementById('barcodeScanBtn');
     if (barcodeScanBtn) barcodeScanBtn.addEventListener('click', openScanner);
+    var scanResultAddBtn = document.getElementById('scanResultAddBtn');
+    if (scanResultAddBtn) scanResultAddBtn.addEventListener('click', function() {
+      if (selectedFood) {
+        foodNameInput.value = selectedFood.name;
+        updatePreview();
+        validateForm();
+        closeModal('scanResultModal');
+        openModal('mealModal');
+        setTimeout(function() { if (mealNameInput) mealNameInput.focus(); }, 200);
+      }
+    });
     var manualUpcLookupBtn = document.getElementById('manualUpcLookupBtn');
     if (manualUpcLookupBtn) manualUpcLookupBtn.addEventListener('click', lookupManualUpc);
     var manualUpcInput = document.getElementById('manualUpcInput');
