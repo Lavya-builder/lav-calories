@@ -1979,7 +1979,7 @@
             var code = barcodes[0].rawValue;
             stopScanner();
             if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
-            lookupByBarcode(code, function(err, item) { handleScanResult(err, item); });
+            lookupByBarcode(code, function(err, item) { handleScanResult(err, item, code); });
           } else {
             emptyCount++;
             // After 3 empty tries, try canvas fallback
@@ -1996,7 +1996,7 @@
                   var code = canvasBarcodes[0].rawValue;
                   stopScanner();
                   if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
-                  lookupByBarcode(code, function(err, item) { handleScanResult(err, item); });
+                  lookupByBarcode(code, function(err, item) { handleScanResult(err, item, code); });
                 }
               }).catch(function() {});
             }
@@ -2030,7 +2030,7 @@
         stopScanner();
         if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
         lookupByBarcode(code, function(err, item) {
-          handleScanResult(err, item);
+          handleScanResult(err, item, code);
         });
       } else {
         if (hintOverlay) {
@@ -2057,10 +2057,9 @@
   function lookupManualUpc() {
     var code = document.getElementById('manualUpcInput').value.trim();
     if (!code || code.length < 6) { alert('Enter a valid barcode (6+ digits)'); return; }
-    document.getElementById('manualUpcInput').value = '';
     stopScanner();
     lookupByBarcode(code, function(err, item) {
-      handleScanResult(err, item);
+      handleScanResult(err, item, code);
     });
   }
   function analyzeNutrition(item) {
@@ -2141,13 +2140,19 @@
     document.getElementById('scanResultContent').innerHTML = html;
   }
 
-  function handleScanResult(err, item) {
+  function handleScanResult(err, item, barcode) {
     if (!err && item) {
       selectedFood = item;
       renderScanAnalysis(item);
       openModal('scanResultModal');
     } else {
-      alert('Product not found. Try searching manually.');
+      stopScanner();
+      if (barcode) {
+        foodNameInput.value = 'barcode: ' + barcode;
+        setTimeout(function() { triggerSearch(); }, 100);
+      }
+      openModal('mealModal');
+      setTimeout(function() { if (foodNameInput) foodNameInput.focus(); }, 200);
     }
   }
 
